@@ -13,7 +13,7 @@ import { BackpackWalletAdapter } from "@solana/wallet-adapter-backpack";
 import "@solana/wallet-adapter-react-ui/styles.css";
 
 export function AppWalletProvider({ children }) {
-  const endpoint = process.env.NEXT_PUBLIC_HELIUS_RPC_URL || "https://api.devnet.solana.com";
+  const endpoint = process.env.NEXT_PUBLIC_RPC_URL || "https://api.devnet.solana.com";
 
   const wallets = useMemo(() => {
     const list = [];
