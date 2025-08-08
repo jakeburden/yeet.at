@@ -11,6 +11,10 @@ name = "yeet_at"
 pinocchio = "0.9.0"
 thiserror = "1"
 
+[dependencies.spubkey]
+package = "solana-pubkey"
+version = "3"
+
 [features]
 no-entrypoint = []
 

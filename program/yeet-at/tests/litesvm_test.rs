@@ -31,7 +31,8 @@ fn test_init_and_create_post() {
     let post_index: u64 = 0;
     let post_pda = Pubkey::find_program_address(&[b"post", author.as_ref(), &post_index.to_le_bytes()], &pid).0;
 
-    let user_space = 1 + 8;
+    // discriminant(1) + owner(32) + post_count(8)
+    let user_space = 1 + 32 + 8;
     let lamports = 1_000_000;
     let ca_user = create_account(&author, &user_pda, lamports, user_space as u64, &pid);
     let tx_ca_user = Transaction::new(&[&author_kp], Message::new(&[ca_user], Some(&author)), svm.latest_blockhash());
