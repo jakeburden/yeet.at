@@ -5,7 +5,7 @@ use pinocchio::{
     pubkey::Pubkey,
     ProgramResult,
 };
-use solana_pubkey as spubkey;
+use pinocchio::pubkey::try_find_program_address;
 
 #[derive(Clone, Copy)]
 struct UserProfile {
@@ -69,9 +69,8 @@ fn init_user(program_id: &Pubkey, accounts: &[AccountInfo]) -> ProgramResult {
     if user_profile.data_len() != UserProfile::SIZE { return Err(ProgramError::InvalidAccountData); }
 
     // Enforce PDA: user profile = PDA(["user", author_pubkey])
-    let program_id_sp = spubkey::Pubkey::new_from_array(<[u8; 32]>::try_from(program_id.as_ref()).unwrap());
     let (expected_profile, _bump) =
-        spubkey::Pubkey::find_program_address(&[b"user", payer.key().as_ref()], &program_id_sp);
+        try_find_program_address(&[b"user", payer.key().as_ref()], program_id).unwrap();
     if user_profile.key().as_ref() != expected_profile.as_ref() { return Err(ProgramError::InvalidAccountData); }
 
     // Prevent re-initialization via discriminant
@@ -103,9 +102,8 @@ fn create_post(program_id: &Pubkey, accounts: &[AccountInfo], content: &[u8]) ->
     // Verify the profile belongs to the author
     if &profile.owner != author.key().as_ref() { return Err(ProgramError::IllegalOwner); }
     // Verify PDA linkage for the profile
-    let program_id_sp = spubkey::Pubkey::new_from_array(<[u8; 32]>::try_from(program_id.as_ref()).unwrap());
     let (expected_profile, _bump) =
-        spubkey::Pubkey::find_program_address(&[b"user", author.key().as_ref()], &program_id_sp);
+        try_find_program_address(&[b"user", author.key().as_ref()], program_id).unwrap();
     if user_profile.key().as_ref() != expected_profile.as_ref() { return Err(ProgramError::InvalidAccountData); }
     let post_index = profile.post_count;
     profile.post_count = profile.post_count.checked_add(1).ok_or(ProgramError::InvalidInstructionData)?;
@@ -118,10 +116,10 @@ fn create_post(program_id: &Pubkey, accounts: &[AccountInfo], content: &[u8]) ->
     if post.key() == user_profile.key() { return Err(ProgramError::InvalidAccountData); }
 
     // Enforce post PDA derived from (author, index)
-    let (expected_post, _bump) = spubkey::Pubkey::find_program_address(
+    let (expected_post, _bump) = try_find_program_address(
         &[b"post", author.key().as_ref(), &post_index.to_le_bytes()],
-        &program_id_sp,
-    );
+        program_id,
+    ).unwrap();
     if post.key().as_ref() != expected_post.as_ref() { return Err(ProgramError::InvalidAccountData); }
 
     // Prevent overwrites; require uninitialized

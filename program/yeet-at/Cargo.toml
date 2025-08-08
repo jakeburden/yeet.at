@@ -10,10 +10,7 @@ name = "yeet_at"
 [dependencies]
 pinocchio = "0.9.0"
 thiserror = "1"
-
-[dependencies.spubkey]
-package = "solana-pubkey"
-version = "3"
+solana-address = { version = "1", features = ["syscalls"] }
 
 [features]
 no-entrypoint = []
