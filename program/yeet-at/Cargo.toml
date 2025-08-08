@@ -1,0 +1,30 @@
+[package]
+name = "yeet-at"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib"]
+name = "yeet_at"
+
+[dependencies]
+pinocchio = "0.9.0"
+thiserror = "1"
+
+[features]
+no-entrypoint = []
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+
+[dev-dependencies]
+litesvm = "0.6"
+solana-pubkey = "2"
+solana-keypair = "2"
+solana-signer = "2"
+solana-message = "2"
+solana-transaction = "2"
+solana-instruction = "2"
+solana-system-interface = "1"

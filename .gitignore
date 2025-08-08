@@ -1,0 +1,77 @@
+# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
+
+# dependencies
+/node_modules
+*/node_modules
+/.pnp
+.pnp.*
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/versions
+
+# testing
+/coverage
+
+# Next.js build output
+.next/
+*/.next/
+*/out/
+*/.next/
+*/out/
+
+# production
+/build
+
+# misc
+.DS_Store
+*.pem
+
+# debug
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# env files (can opt-in for committing if needed)
+.env*
+
+# vercel
+.vercel
+
+# typescript
+*.tsbuildinfo
+next-env.d.ts
+# solana program build artifacts
+/target
+**/target
+/.anchor
+/.cargo
+/.vscode
+*.so
+*.dSYM
+*.log
+
+# solana CLI files
+solana.yaml
+*keypair.json*
+**/*keypair.json*
+*.log
+
+# test validator ledger
+/test-ledger
+/ledger
+
+# Anchor files
+/.anchor
+/.anchor-build
+
+# BPF artifacts
+*.bpf
+*.bpf.*
+/dist/program
+
+# Misc
+*.rs.bk
+# End Generation Here
