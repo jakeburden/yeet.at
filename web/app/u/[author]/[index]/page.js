@@ -5,7 +5,8 @@ import { PublicKey } from "@solana/web3.js";
 import { POST_HEADER_BASE_SIZE, getYeetProgramIdStr } from "@/lib/yeet-helpers";
 
 export default function PostPage({ params }) {
-  const { author, index } = params ?? {};
+  const resolvedParams = params && typeof params.then === "function" ? React.use(params) : params;
+  const { author, index } = resolvedParams ?? {};
   const [content, setContent] = React.useState("");
   const { connection } = useConnection();
 

@@ -1,5 +1,6 @@
 "use client";
 import React from "react";
+import { Buffer } from "buffer";
 import Link from "next/link";
 import ConnectButton from "@/components/ConnectButton";
 import { useWallet } from "@solana/wallet-adapter-react";
@@ -34,37 +35,47 @@ export default function Home() {
     // Fresh blockhash
     const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash();
     tx.recentBlockhash = blockhash;
-    // Preflight
+    // Prefer sign locally + POST raw to server route (server does preflight + send + confirm)
     try {
-      const sim = await connection.simulateTransaction(tx, { sigVerify: false, commitment: "processed" });
-      if (sim.value?.err) {
-        const logs = sim.value?.logs || [];
-        console.error("simulation failed", sim.value.err, logs);
-        setErrorMsg((logs && logs.join("\n")) || "Simulation failed");
-        return null;
+      if (wallet?.signTransaction) {
+        const signed = await wallet.signTransaction(tx);
+        const raw = signed.serialize();
+        const rawBase64 = Buffer.from(raw).toString("base64");
+        const res = await fetch("/api/solana/send", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            rawTx: rawBase64,
+            options: { preflightCommitment: "processed", maxRetries: 3, skipPreflight: false },
+            blockhash,
+            lastValidBlockHeight,
+          }),
+        });
+        const json = await res.json();
+        if (!res.ok) {
+          const logs = json?.logs;
+          if (Array.isArray(logs) && logs.length) {
+            setErrorMsg(logs.join("\n"));
+          } else {
+            setErrorMsg(json?.error || "Send failed");
+          }
+          return null;
+        }
+        return json.signature;
       }
-    } catch (_) {}
-    // Try standard adapter sendTransaction first
+    } catch (rawErr) {
+      console.warn("server send path failed", rawErr);
+    }
+    // Fallback to adapter sendTransaction (no client-side simulate to avoid web3.js arg issues)
     try {
       const sig = await sendTransaction(tx, connection, { skipPreflight: true });
       await connection.confirmTransaction({ signature: sig, blockhash, lastValidBlockHeight }, "confirmed");
       return sig;
     } catch (sendErr) {
-      console.warn("sendTransaction failed", sendErr);
-      // Fall back to sign+raw only if supported by the selected wallet
-      try {
-        if (!wallet?.signTransaction) throw sendErr;
-        const signed = await wallet.signTransaction(tx);
-        const raw = signed.serialize();
-        const sig = await connection.sendRawTransaction(raw, { skipPreflight: false });
-        await connection.confirmTransaction({ signature: sig, blockhash, lastValidBlockHeight }, "confirmed");
-        return sig;
-      } catch (rawErr) {
-        console.error("raw send failed", rawErr);
-        const msg = rawErr?.message || rawErr?.toString?.() || "Send failed";
-        setErrorMsg(`Failed to post: ${msg}`);
-        return null;
-      }
+      console.error("sendTransaction failed", sendErr);
+      const msg = sendErr?.message || sendErr?.toString?.() || "Send failed";
+      setErrorMsg(`Failed to post: ${msg}`);
+      return null;
     }
   }
 
@@ -95,8 +106,9 @@ export default function Home() {
       const { pubkey: userProfilePubkey, acct: userAcct } = await resolveUserProfileAccount();
 
       const instructions = [];
-      // Add compute budget hints (helps wallet simulation warnings)
+      // Add compute budget hints (CU price + limit)
       instructions.push(
+        ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 375_000 }),
         ComputeBudgetProgram.setComputeUnitLimit({ units: 200_000 })
       );
 

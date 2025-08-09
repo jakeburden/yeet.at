@@ -6,7 +6,8 @@ import { PublicKey } from "@solana/web3.js";
 import { EXPECTED_USER_SIZE, getYeetProgramIdStr } from "@/lib/yeet-helpers";
 
 export default function UserPosts({ params }) {
-  const { author } = params ?? {};
+  const resolvedParams = params && typeof params.then === "function" ? React.use(params) : params;
+  const { author } = resolvedParams ?? {};
   const [posts, setPosts] = React.useState([]);
   const { connection } = useConnection();
 
