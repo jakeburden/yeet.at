@@ -2,6 +2,7 @@
 import React, { use as usePromise } from "react";
 import { useConnection } from "@solana/wallet-adapter-react";
 import { PublicKey } from "@solana/web3.js";
+import { EXPECTED_USER_SIZE, getYeetProgramIdStr } from "@/lib/yeet-helpers";
 
 export default function UserPosts({ params }) {
   const { author } = usePromise(params);
@@ -11,18 +12,18 @@ export default function UserPosts({ params }) {
   React.useEffect(() => {
     (async () => {
       try {
-        const programIdStr = process.env.NEXT_PUBLIC_MICROBLOG_PROGRAM_ID;
-        if (!programIdStr) return;
+        const programIdStr = getYeetProgramIdStr();
+        if (!programIdStr || !author) return;
         const programId = new PublicKey(programIdStr);
         const authorPk = new PublicKey(author);
         // Derive user profile and read post_count
         const userProfilePubkey = await PublicKey.createWithSeed(authorPk, "user", programId);
         const userAcct = await connection.getAccountInfo(userProfilePubkey);
-        if (!userAcct || !userAcct.data || userAcct.data.length < 9) {
+        if (!userAcct || !userAcct.data || userAcct.data.length < EXPECTED_USER_SIZE) {
           setPosts([]);
           return;
         }
-        const postCount = Number(new DataView(userAcct.data.buffer, userAcct.data.byteOffset + 1, 8).getBigUint64(0, true));
+        const postCount = Number(new DataView(userAcct.data.buffer, userAcct.data.byteOffset + 33, 8).getBigUint64(0, true));
         const results = [];
         for (let i = 0; i < postCount; i++) {
           const postPubkey = await PublicKey.createWithSeed(authorPk, `post-${i}`, programId);

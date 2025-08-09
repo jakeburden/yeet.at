@@ -5,6 +5,7 @@ import { useWallet } from "@solana/wallet-adapter-react";
 import { useWalletModal } from "@solana/wallet-adapter-react-ui";
 import { useConnection } from "@solana/wallet-adapter-react";
 import { PublicKey, Transaction, TransactionInstruction, SystemProgram, ComputeBudgetProgram } from "@solana/web3.js";
+import { USER_SEED, EXPECTED_USER_SIZE, POST_HEADER_BASE_SIZE, getYeetProgramIdStr } from "@/lib/yeet-helpers";
 
 export default function Home() {
   const [content, setContent] = React.useState("");
@@ -17,48 +18,99 @@ export default function Home() {
   const { publicKey, connected, wallet, sendTransaction } = useWallet();
   const { connection } = useConnection();
   const { setVisible: showWalletSelectionModal } = useWalletModal();
+  const PROGRAM_ID_STR = getYeetProgramIdStr();
+
+  const resolveUserProfileAccount = React.useCallback(async () => {
+    if (!publicKey) return { pubkey: null, acct: null };
+    if (!PROGRAM_ID_STR) return { pubkey: null, acct: null };
+    const programId = new PublicKey(PROGRAM_ID_STR);
+    const pubkey = await PublicKey.createWithSeed(publicKey, USER_SEED, programId);
+    const acct = await connection.getAccountInfo(pubkey);
+    return { pubkey, acct };
+  }, [publicKey, connection, PROGRAM_ID_STR]);
+
+  async function simulateAndSend(tx) {
+    // Fresh blockhash
+    const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash();
+    tx.recentBlockhash = blockhash;
+    // Preflight
+    try {
+      const sim = await connection.simulateTransaction(tx, { sigVerify: false, commitment: "processed" });
+      if (sim.value?.err) {
+        const logs = sim.value?.logs || [];
+        console.error("simulation failed", sim.value.err, logs);
+        setErrorMsg((logs && logs.join("\n")) || "Simulation failed");
+        return null;
+      }
+    } catch (_) {}
+    // Try standard adapter sendTransaction first
+    try {
+      const sig = await sendTransaction(tx, connection, { skipPreflight: true });
+      await connection.confirmTransaction({ signature: sig, blockhash, lastValidBlockHeight }, "confirmed");
+      return sig;
+    } catch (sendErr) {
+      console.warn("sendTransaction failed", sendErr);
+      // Fall back to sign+raw only if supported by the selected wallet
+      try {
+        if (!wallet?.signTransaction) throw sendErr;
+        const signed = await wallet.signTransaction(tx);
+        const raw = signed.serialize();
+        const sig = await connection.sendRawTransaction(raw, { skipPreflight: false });
+        await connection.confirmTransaction({ signature: sig, blockhash, lastValidBlockHeight }, "confirmed");
+        return sig;
+      } catch (rawErr) {
+        console.error("raw send failed", rawErr);
+        const msg = rawErr?.message || rawErr?.toString?.() || "Send failed";
+        setErrorMsg(`Failed to post: ${msg}`);
+        return null;
+      }
+    }
+  }
 
   const handlePost = async (e) => {
     e.preventDefault();
+    if (posting) return;
     const text = content.trim();
     if (!text) return;
+    // Enforce on-chain max of 512 bytes (program validates bytes, not chars)
+    if (Buffer.byteLength(text, "utf8") > 512) {
+      setErrorMsg("Post is over 512 bytes when UTF-8 encoded.");
+      return;
+    }
     if (!connected || !publicKey || !wallet) {
       showWalletSelectionModal(true);
       return;
     }
-    const programIdStr = process.env.NEXT_PUBLIC_MICROBLOG_PROGRAM_ID;
-    if (!programIdStr) {
-      setErrorMsg("Program ID not set. Configure NEXT_PUBLIC_MICROBLOG_PROGRAM_ID.");
+    if (!PROGRAM_ID_STR) {
+      setErrorMsg("Program ID not set. Configure NEXT_PUBLIC_YEET_PROGRAM_ID.");
       return;
     }
     try {
       setPosting(true);
       setErrorMsg("");
-      const programId = new PublicKey(programIdStr);
+      const programId = new PublicKey(PROGRAM_ID_STR);
 
-      // Derive or look up user profile (with seed, owned by program)
-      const userSeed = "user";
-      const userProfilePubkey = await PublicKey.createWithSeed(publicKey, userSeed, programId);
-      const userAcct = await connection.getAccountInfo(userProfilePubkey);
+      // Resolve user profile account (migrate from legacy undersized account if needed)
+      const { pubkey: userProfilePubkey, acct: userAcct } = await resolveUserProfileAccount();
 
       const instructions = [];
       // Add compute budget hints (helps wallet simulation warnings)
       instructions.push(
-        ComputeBudgetProgram.setComputeUnitLimit({ units: 200_000 }),
-        ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 1 })
+        ComputeBudgetProgram.setComputeUnitLimit({ units: 200_000 })
       );
 
       // If profile missing, create with seed then init_user
       const preview = [];
+      let userLamports = 0;
       if (!userAcct) {
         preview.push("Create user account");
-        const userSpace = 1 + 8; // discriminator + post_count
-        const userLamports = await connection.getMinimumBalanceForRentExemption(userSpace);
+        const userSpace = EXPECTED_USER_SIZE; // discriminator + owner + post_count
+        userLamports = await connection.getMinimumBalanceForRentExemption(userSpace);
         instructions.push(
           SystemProgram.createAccountWithSeed({
             fromPubkey: publicKey,
             basePubkey: publicKey,
-            seed: userSeed,
+            seed: USER_SEED,
             newAccountPubkey: userProfilePubkey,
             lamports: userLamports,
             space: userSpace,
@@ -76,23 +128,37 @@ export default function Home() {
             data: Buffer.from([0]), // InitUser
           })
         );
+      } else if (userAcct.data?.[0] !== 1) {
+        // Account exists but not initialized yet
+        preview.push("Init user");
+        instructions.push(
+          new TransactionInstruction({
+            programId,
+            keys: [
+              { pubkey: publicKey, isSigner: true, isWritable: false },
+              { pubkey: userProfilePubkey, isSigner: false, isWritable: true },
+            ],
+            data: Buffer.from([0]),
+          })
+        );
       }
 
       // Read current post_count (default 0 if not initialized)
       let postIndex = 0;
       const freshUserAcct = await connection.getAccountInfo(userProfilePubkey);
-      if (freshUserAcct && freshUserAcct.owner.equals(programId) && freshUserAcct.data?.length >= 9) {
-        // bytes [1..9) little-endian u64
-        postIndex = Number(new DataView(freshUserAcct.data.buffer, freshUserAcct.data.byteOffset + 1, 8).getBigUint64(0, true));
+      if (freshUserAcct && freshUserAcct.owner.equals(programId) && freshUserAcct.data?.length >= EXPECTED_USER_SIZE) {
+        // bytes [33..41) little-endian u64 (after 1-byte discriminant and 32-byte owner)
+        postIndex = Number(new DataView(freshUserAcct.data.buffer, freshUserAcct.data.byteOffset + 33, 8).getBigUint64(0, true));
       }
 
       const postSeed = `post-${postIndex}`;
       const postPubkey = await PublicKey.createWithSeed(publicKey, postSeed, programId);
       const postAcct = await connection.getAccountInfo(postPubkey);
-      const postSpace = 1 + 32 + 8 + 2 + Buffer.byteLength(text, "utf8");
+      const postSpace = POST_HEADER_BASE_SIZE + Buffer.byteLength(text, "utf8");
+      let postLamports = 0;
       if (!postAcct) {
         preview.push("Create post account");
-        const postLamports = await connection.getMinimumBalanceForRentExemption(postSpace);
+        postLamports = await connection.getMinimumBalanceForRentExemption(postSpace);
         instructions.push(
           SystemProgram.createAccountWithSeed({
             fromPubkey: publicKey,
@@ -124,13 +190,29 @@ export default function Home() {
       setTxPreview(preview);
       setTxConfirmed(false);
 
+      // Balance pre-check to avoid wallet adapter's generic error
+      try {
+        const balance = await connection.getBalance(publicKey, "processed");
+        const estFees = 8_000; // single tx
+        const required = (userAcct ? 0 : userLamports) + (postAcct ? 0 : postLamports) + estFees;
+        if (balance < required) {
+          const toSol = (lamps) => (lamps / 1_000_000_000).toFixed(6);
+          setErrorMsg(`Insufficient funds: need ~${toSol(required)} SOL, have ${toSol(balance)} SOL.`);
+          return;
+        }
+      } catch (_) {}
+
+      // Ensure sufficient lamports (rent + fees). If low, request a small airdrop on devnet first
+      // no auto-airdrop; user funds accounts manually
+
+      // Build and send single transaction
       const tx = new Transaction().add(...instructions);
-      // Ensure fee payer and blockhash set for better UX
       tx.feePayer = publicKey;
       const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash();
       tx.recentBlockhash = blockhash;
-      const sig = await sendTransaction(tx, connection, { skipPreflight: false });
-      await connection.confirmTransaction({ signature: sig, blockhash, lastValidBlockHeight }, "confirmed");
+      // Send via our simulateAndSend helper (sign+raw path)
+      const sig = await simulateAndSend(tx);
+      if (!sig) return;
       // Clear composer on success
       setContent("");
       setLastSig(sig);
@@ -140,15 +222,14 @@ export default function Home() {
         { index: postIndex, content: text, author: publicKey.toBase58(), sig },
         ...prev,
       ]);
-      // Optional: console link
-      console.log(`Posted: https://explorer.solana.com/tx/${sig}?cluster=devnet`);
+      // Optional: console link printed above for each tx
     } catch (err) {
       const msg = (err && (err.message || err.toString())) || "Failed to post";
       if (msg.toLowerCase().includes("rejected")) {
         // user canceled; keep composer content
         setErrorMsg("Transaction approval was canceled");
       } else {
-        setErrorMsg("Failed to post. Check wallet and network.");
+        setErrorMsg(`Failed to post: ${msg}`);
       }
       console.error("post failed", err);
     } finally {
@@ -161,13 +242,11 @@ export default function Home() {
     (async () => {
       if (!connected || !publicKey) return;
       try {
-        const programIdStr = process.env.NEXT_PUBLIC_MICROBLOG_PROGRAM_ID;
-        if (!programIdStr) return;
-        const programId = new PublicKey(programIdStr);
-        const userProfilePubkey = await PublicKey.createWithSeed(publicKey, "user", programId);
-        const userAcct = await connection.getAccountInfo(userProfilePubkey);
-        if (!userAcct || userAcct.data.length < 9) return;
-        const postCount = Number(new DataView(userAcct.data.buffer, userAcct.data.byteOffset + 1, 8).getBigUint64(0, true));
+        if (!PROGRAM_ID_STR) return;
+        const programId = new PublicKey(PROGRAM_ID_STR);
+        const { pubkey: userProfilePubkey, acct: userAcct } = await resolveUserProfileAccount();
+        if (!userAcct || userAcct.data.length < EXPECTED_USER_SIZE) return;
+        const postCount = Number(new DataView(userAcct.data.buffer, userAcct.data.byteOffset + 33, 8).getBigUint64(0, true));
         const results = [];
         for (let i = 0; i < postCount; i++) {
           const postPubkey = await PublicKey.createWithSeed(publicKey, `post-${i}`, programId);
@@ -185,7 +264,7 @@ export default function Home() {
         // ignore
       }
     })();
-  }, [connected, publicKey, connection]);
+  }, [connected, publicKey, connection, resolveUserProfileAccount, PROGRAM_ID_STR]);
 
   return (
     <div className="space-y-6">
