@@ -5,7 +5,7 @@ use pinocchio::{
     pubkey::Pubkey,
     ProgramResult,
 };
-use pinocchio::pubkey::try_find_program_address;
+// use pinocchio::pubkey::try_find_program_address;
 
 #[derive(Clone, Copy)]
 struct UserProfile {
@@ -68,11 +68,6 @@ fn init_user(program_id: &Pubkey, accounts: &[AccountInfo]) -> ProgramResult {
     if !user_profile.is_writable() { return Err(ProgramError::InvalidAccountData); }
     if user_profile.data_len() != UserProfile::SIZE { return Err(ProgramError::InvalidAccountData); }
 
-    // Enforce PDA: user profile = PDA(["user", author_pubkey])
-    let (expected_profile, _bump) =
-        try_find_program_address(&[b"user", payer.key().as_ref()], program_id).unwrap();
-    if user_profile.key().as_ref() != expected_profile.as_ref() { return Err(ProgramError::InvalidAccountData); }
-
     // Prevent re-initialization via discriminant
     {
         let data = user_profile.try_borrow_data()?;
@@ -101,10 +96,6 @@ fn create_post(program_id: &Pubkey, accounts: &[AccountInfo], content: &[u8]) ->
     let mut profile = UserProfile::unpack_from_slice(&profile_data[..UserProfile::SIZE])?;
     // Verify the profile belongs to the author
     if &profile.owner != author.key().as_ref() { return Err(ProgramError::IllegalOwner); }
-    // Verify PDA linkage for the profile
-    let (expected_profile, _bump) =
-        try_find_program_address(&[b"user", author.key().as_ref()], program_id).unwrap();
-    if user_profile.key().as_ref() != expected_profile.as_ref() { return Err(ProgramError::InvalidAccountData); }
     let post_index = profile.post_count;
     profile.post_count = profile.post_count.checked_add(1).ok_or(ProgramError::InvalidInstructionData)?;
     profile.pack_into_slice(&mut profile_data[..UserProfile::SIZE]);
@@ -114,13 +105,6 @@ fn create_post(program_id: &Pubkey, accounts: &[AccountInfo], content: &[u8]) ->
     if post.data_len() != (PostHeader::BASE_SIZE + content.len()) { return Err(ProgramError::InvalidAccountData); }
     if !post.is_writable() { return Err(ProgramError::InvalidAccountData); }
     if post.key() == user_profile.key() { return Err(ProgramError::InvalidAccountData); }
-
-    // Enforce post PDA derived from (author, index)
-    let (expected_post, _bump) = try_find_program_address(
-        &[b"post", author.key().as_ref(), &post_index.to_le_bytes()],
-        program_id,
-    ).unwrap();
-    if post.key().as_ref() != expected_post.as_ref() { return Err(ProgramError::InvalidAccountData); }
 
     // Prevent overwrites; require uninitialized
     {

@@ -18,7 +18,9 @@ Create a `.env.local` in `web/` with:
 
 ```bash
 # Required: the deployed program id of the microblog program
-NEXT_PUBLIC_MICROBLOG_PROGRAM_ID=YourProgramId111111111111111111111111111111
+# Either var name works; NEXT_PUBLIC_YEET_PROGRAM_ID takes precedence in the app
+NEXT_PUBLIC_YEET_PROGRAM_ID=YourProgramId111111111111111111111111111111
+# NEXT_PUBLIC_MICROBLOG_PROGRAM_ID=YourProgramId111111111111111111111111111111
 
 # Optional: RPC; defaults to "devnet" if unset
 NEXT_PUBLIC_RPC_URL=https://rpc.helius.xyz/?api-key=YOUR_KEY
@@ -55,7 +57,7 @@ The program exposes two instructions:
   - Validates sizes/ownership, increments the user’s `post_count`, and writes the post header + UTF-8 content into `post_account`.
 
 Account layouts (packed, little-endian):
-- User profile: `1-byte tag (1)` + `u64 post_count` → total 9 bytes
+- User profile: `1-byte tag (1)` + `32-byte owner` + `u64 post_count` → total 41 bytes
 - Post account: `1-byte tag (2)` + `32-byte author` + `u64 index` + `u16 content_len` + `content[0..512]`
 
 Addressing model used by the webapp:
