@@ -1,11 +1,12 @@
 "use client";
-import React, { use as usePromise } from "react";
+import React from "react";
+import Link from "next/link";
 import { useConnection } from "@solana/wallet-adapter-react";
 import { PublicKey } from "@solana/web3.js";
 import { EXPECTED_USER_SIZE, getYeetProgramIdStr } from "@/lib/yeet-helpers";
 
 export default function UserPosts({ params }) {
-  const { author } = usePromise(params);
+  const { author } = params ?? {};
   const [posts, setPosts] = React.useState([]);
   const { connection } = useConnection();
 
@@ -23,14 +24,22 @@ export default function UserPosts({ params }) {
           setPosts([]);
           return;
         }
-        const postCount = Number(new DataView(userAcct.data.buffer, userAcct.data.byteOffset + 33, 8).getBigUint64(0, true));
+        const postCount = Number(
+          new DataView(userAcct.data.buffer, userAcct.data.byteOffset + 33, 8).getBigUint64(0, true)
+        );
         const results = [];
         for (let i = 0; i < postCount; i++) {
           const postPubkey = await PublicKey.createWithSeed(authorPk, `post-${i}`, programId);
           const postAcct = await connection.getAccountInfo(postPubkey);
           if (!postAcct || !postAcct.data || postAcct.data.length < 43) continue;
-          const idx = Number(new DataView(postAcct.data.buffer, postAcct.data.byteOffset + 33, 8).getBigUint64(0, true));
-          const len = postAcct.data.readUInt16LE(41);
+          const idx = Number(
+            new DataView(postAcct.data.buffer, postAcct.data.byteOffset + 33, 8).getBigUint64(0, true)
+          );
+          const len = new DataView(
+            postAcct.data.buffer,
+            postAcct.data.byteOffset,
+            postAcct.data.byteLength
+          ).getUint16(41, true);
           const slice = postAcct.data.subarray(43, 43 + len);
           const text = new TextDecoder().decode(slice);
           results.push({ pubkey: postPubkey.toBase58(), index: idx, content: text });
@@ -41,7 +50,7 @@ export default function UserPosts({ params }) {
         console.error(e);
       }
     })();
-  }, [author]);
+  }, [author, connection]);
 
   return (
     <div className="space-y-4">
@@ -49,7 +58,7 @@ export default function UserPosts({ params }) {
       <ul className="space-y-3">
         {posts.map((p) => (
           <li key={p.pubkey} className="border rounded p-3">
-            <a href={`/u/${author}/${p.index}`} className="underline">#{p.index}</a>
+            <Link href={`/u/${author}/${p.index}`} className="underline">#{p.index}</Link>
             <p className="mt-1 whitespace-pre-wrap break-words">{p.content}</p>
           </li>
         ))}

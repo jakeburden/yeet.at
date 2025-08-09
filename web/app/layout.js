@@ -20,7 +20,9 @@ export const metadata = {
 export default function RootLayout({ children }) {
   return (
     <html lang="en">
-      <body className={`${geistSans.variable} ${geistMono.variable} antialiased max-w-screen-sm mx-auto p-4`}>
+      <body className={`${geistSans.variable} ${geistMono.variable} antialiased max-w-screen-sm mx-auto p-4`}
+        suppressHydrationWarning
+      >
         <AppWalletProvider>
           {children}
         </AppWalletProvider>

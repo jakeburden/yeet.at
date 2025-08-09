@@ -1,5 +1,6 @@
 "use client";
 import React from "react";
+import Link from "next/link";
 import ConnectButton from "@/components/ConnectButton";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { useWalletModal } from "@solana/wallet-adapter-react-ui";
@@ -73,7 +74,7 @@ export default function Home() {
     const text = content.trim();
     if (!text) return;
     // Enforce on-chain max of 512 bytes (program validates bytes, not chars)
-    if (Buffer.byteLength(text, "utf8") > 512) {
+    if (new TextEncoder().encode(text).length > 512) {
       setErrorMsg("Post is over 512 bytes when UTF-8 encoded.");
       return;
     }
@@ -125,7 +126,7 @@ export default function Home() {
               { pubkey: publicKey, isSigner: true, isWritable: false },
               { pubkey: userProfilePubkey, isSigner: false, isWritable: true },
             ],
-            data: Buffer.from([0]), // InitUser
+            data: new Uint8Array([0]), // InitUser
           })
         );
       } else if (userAcct.data?.[0] !== 1) {
@@ -138,7 +139,7 @@ export default function Home() {
               { pubkey: publicKey, isSigner: true, isWritable: false },
               { pubkey: userProfilePubkey, isSigner: false, isWritable: true },
             ],
-            data: Buffer.from([0]),
+            data: new Uint8Array([0]),
           })
         );
       }
@@ -154,7 +155,8 @@ export default function Home() {
       const postSeed = `post-${postIndex}`;
       const postPubkey = await PublicKey.createWithSeed(publicKey, postSeed, programId);
       const postAcct = await connection.getAccountInfo(postPubkey);
-      const postSpace = POST_HEADER_BASE_SIZE + Buffer.byteLength(text, "utf8");
+      const postTextBytes = new TextEncoder().encode(text);
+      const postSpace = POST_HEADER_BASE_SIZE + postTextBytes.length;
       let postLamports = 0;
       if (!postAcct) {
         preview.push("Create post account");
@@ -173,7 +175,9 @@ export default function Home() {
       }
 
       // CreatePost
-      const data = Buffer.concat([Buffer.from([1]), Buffer.from(text, "utf8")]);
+      const data = new Uint8Array(1 + postTextBytes.length);
+      data[0] = 1;
+      data.set(postTextBytes, 1);
       preview.push("Create post");
       instructions.push(
         new TransactionInstruction({
@@ -252,7 +256,11 @@ export default function Home() {
           const postPubkey = await PublicKey.createWithSeed(publicKey, `post-${i}`, programId);
           const postAcct = await connection.getAccountInfo(postPubkey);
           if (!postAcct || postAcct.data.length < 43) continue;
-          const len = postAcct.data.readUInt16LE(41);
+          const len = new DataView(
+            postAcct.data.buffer,
+            postAcct.data.byteOffset,
+            postAcct.data.byteLength
+          ).getUint16(41, true);
           const slice = postAcct.data.subarray(43, 43 + len);
           const text = new TextDecoder().decode(slice);
           const idx = Number(new DataView(postAcct.data.buffer, postAcct.data.byteOffset + 33, 8).getBigUint64(0, true));
@@ -285,7 +293,7 @@ export default function Home() {
         {lastSig && (
           <div className="text-sm space-y-1">
             <p>
-              Posted! View on <a className="underline" href={`https://solscan.io/tx/${lastSig}?cluster=devnet`} target="_blank" rel="noreferrer">Solscan</a>
+              Posted! View on <a className="underline" href={`https://solscan.io/tx/${lastSig}?cluster=devnet`} target="_blank" rel="noopener noreferrer">Solscan</a>
             </p>
             {txPreview.length > 0 && (
               <div className="rounded border p-2">
@@ -314,7 +322,7 @@ export default function Home() {
         <ul className="mt-3 space-y-3">
           {localPosts.map((p) => (
             <li key={`${p.author}-${p.index}`} className="border rounded p-3">
-              <a className="underline" href={`/u/${p.author}/${p.index}`}>#{p.index}</a>
+              <Link className="underline" href={`/u/${p.author}/${p.index}`}>#{p.index}</Link>
               <p className="mt-1 whitespace-pre-wrap break-words">{p.content}</p>
             </li>
           ))}

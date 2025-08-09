@@ -37,7 +37,7 @@ export default function ConnectButton() {
 
   async function handleConnectClick() {
     try {
-      const ready = wallet?.adapter?.readyState === "Installed" || wallet?.adapter?.readyState === "Loadable";
+      const ready = wallet?.adapter?.readyState === WalletReadyState.Installed || wallet?.adapter?.readyState === WalletReadyState.Loadable;
       if (wallet?.adapter?.name === SolanaMobileWalletAdapterWalletName) {
         await wallet.adapter.connect();
       } else if (mobileWalletAdapter) {
